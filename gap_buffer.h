@@ -1,6 +1,9 @@
 #ifndef __GAP_BUFFER_H__
 #define __GAP_BUFFER_H__
 
+#include <stdlib.h>
+#include <stdbool.h>
+
 // gap buffer:
 // 
 // contains data with a gap in the middle
@@ -35,127 +38,38 @@ struct _gap_buffer {
 
 typedef struct _gap_buffer gap_buffer;
 
-gap_buffer *gap_buffer_new(size_t len) {
-  gap_buffer *new_gb = calloc(1, sizeof(gap_buffer));
+gap_buffer *gap_buffer_new(size_t len);
 
-  if(new_gb && len > 0) {
-    new_gb->buf = malloc(len);
-    if(new_gb->buf) {
-      new_gb->maxlen = len;
-      new_gb->len = 0;
-      new_gb->gap_end = len;
-    } else {
-      free(new_gb);
-      new_gb = NULL;
-    }
-  }
-  return new_gb;
-}
+void gap_buffer_delete(gap_buffer *gb);
 
-void gap_buffer_delete(gap_buffer *gb) {
-  if(gb) {
-    if(gb->buf) {
-      free(gb->buf);
-    }
-    free(gb);
-  }
-}
+bool gap_buffer_empty(gap_buffer *gb);
 
-inline bool gap_buffer_empty(gap_buffer *gb) {
-  return gb->len == 0;
-}
+size_t gap_buffer_length(gap_buffer *gb);
 
-// makes sure the gap beginning is at the cursor position
-int gap_buffer_sync(gap_buffer *gb) {
-  if(gb->gap_begin == gb->cursor) {
-    return gb->gap_begin;
-  }
+// sync up the gap with the cursor
+int _gap_buffer_sync(gap_buffer *gb);
 
-  if(gb->cursor < gb->gap_begin) { // cursor is in front of the gap, need to move data back
-    int count = gb->gap_begin - gb->cursor;
-    memmove(gb->buf + gb->gap_end - count, gb->buf + gb->cursor, count);
-    gb->gap_begin -= count;
-    gb->gap_end -= count;
-  } else { // cursor is in/past the gap, need to move data to front of buffer
-    int count = gb->cursor - gb->gap_end;
-    memmove(gb->buf + gb->gap_begin, gb->buf + gb->gap_end, count);
-    gb->gap_begin += count;
-    gb->gap_end += count;
-    //gb->cursor = gb->gap_begin;
-  }
-  return gb->cursor;
-}
+// checks if the buffer should be expanded
+int _gap_buffer_chkexpand(gap_buffer *gb);
 
-int gap_buffer_chkexpand(gap_buffer *gb) {
-  if(gb->gap_begin == gb->gap_end) {
-    size_t newsize = gb->len ? gb->len * 2 : 1;
-    if(newsize < gb->len) { // check for overflow
-      return false;
-    }
+// shrink the storage allocated for the gap buffer if it's below a low watermark
+int _gap_buffer_chkshrink(gap_buffer *gb);
 
-    void *newptr = realloc(gb->buf, newsize);
-    if(!newptr) {
-      return false;
-    }
+// move the cursor by a relative amount (will be >= 0 and <= len)
+int gap_buffer_movepos(gap_buffer *gb, int count);
 
-    size_t move_ct = gb->len - gb->gap_end;
-    memmove(newptr + newsize - move_ct, newptr + gb->gap_end, move_ct);
-    gb->buf = newptr;
-    gb->gap_end = newsize - move_ct;
-    gb->maxlen = newsize;
-  }
-  return true;
-}
+// set the cursor position within the buffer (checks to be sure final position >= 0 and <= len)
+int gap_buffer_setpos(gap_buffer *gb, int pos);
 
-int gap_buffer_movepos(gap_buffer *gb, int count) {
-  gb->cursor += count;
-  if(gb->cursor < 0) {
-    gb->cursor = 0;
-  } else if(gb->cursor > gb->len) {
-    gb->cursor = gb->len; }
-  return gb->cursor;
-}
+// return the number of characters added to the buffer
+int gap_buffer_addch(gap_buffer *gb, char c);
 
-int gap_buffer_setpos(gap_buffer *gb, int count) {
-  gb->cursor = count;
-  if(gb->cursor < 0) {
-    gb->cursor = 0;
-  } else if(gb->cursor > gb->len) {
-    gb->cursor = gb->len;
-  }
-  return gb->cursor;
-}
+// delete a single character before the cursor position
+int gap_buffer_delch(gap_buffer *gb);
 
-// return the number of characters added
-int gap_buffer_addch(gap_buffer *gb, char c) {
-  gap_buffer_sync(gb); // sync gap buffer with cursor
-  if(!gap_buffer_chkexpand(gb)) {
-    return 0;
-  }
-  if(gb->len >= gb->maxlen) {
-    return 0;
-  }
+int gap_buffer_copy(gap_buffer *gb, char *dst, size_t len);
 
-  gb->buf[gb->cursor] = c;
-  ++gb->cursor;
-  ++gb->gap_begin;
-  ++gb->len;
-  return 1;
-}
-
-int gap_buffer_delch(gap_buffer *gb) {
-  gap_buffer_sync(gb); // sync gap buffer with cursor
-  if(gb->len == 0 || gb->cursor == 0) {
-    return 0;
-  }
-
-  --gb->cursor;
-  --gb->gap_begin;
-  --gb->len;
-  //gb->buf[gb->cursor] = 0;
-
-  return 1;
-}
-
+char gap_buffer_getbyte(gap_buffer *gb, size_t pos);
+char *gap_buffer_getpos(gap_buffer *gb, size_t pos);
 
 #endif // __GAP_BUFFER_H__
