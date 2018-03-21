@@ -87,11 +87,9 @@ int main(int argc, char *argv[]) {
           mvwin(g_mainwnd, 0, 0);
 
           wresize(g_statuswnd, 1, COLS);
-          //werase(g_statuswnd);
           mvwin(g_statuswnd, LINES - 2, 0);
 
           wresize(g_inputwnd, 1, COLS);
-          //werase(g_inputwnd);
           mvwin(g_inputwnd, LINES - 1, 0);
         }
         break;
@@ -110,12 +108,15 @@ int main(int argc, char *argv[]) {
         break;
 #endif // 0
       default:
+        werase(stdscr);
         werase(g_mainwnd);
         werase(g_statuswnd);
         werase(g_inputwnd);
 
         wprintw(g_mainwnd, "Key pressed: %d %#x %#o\n", r, r, r);
-        wprintw(g_mainwnd, "lines: %d, cols: %d", LINES, COLS);
+        wprintw(g_mainwnd, "lines: %d, cols: %d\n", LINES, COLS);
+        wprintw(g_mainwnd, "cur x y: %d %d\nmax x y: %d %d\n", getcurx(g_mainwnd), getcury(g_mainwnd), getmaxx(g_mainwnd), getmaxy(g_mainwnd));
+
         if(isprint(r)) {
           waddstr(g_statuswnd, "printable");
           waddch(g_inputwnd, r);
@@ -135,7 +136,6 @@ int main(int argc, char *argv[]) {
         ACS_LLCORNER | COLOR_PAIR(1),
         ACS_LRCORNER | COLOR_PAIR(1));
         */
-    werase(stdscr);
     wnoutrefresh(stdscr);
     wnoutrefresh(g_mainwnd);
     wnoutrefresh(g_statuswnd);
@@ -195,17 +195,17 @@ int setup_windows() {
     waddstr(g_mainwnd, "Main window");
     wnoutrefresh(g_mainwnd);
   }
-  g_inputwnd = newwin(1, COLS, LINES - 1, 0);
-  if(g_inputwnd) {
-    //wattrset(g_statuswnd, COLOR_PAIR(1));
-    waddstr(g_inputwnd, "Input window");
-    wnoutrefresh(g_inputwnd);
-  }
   g_statuswnd = newwin(1, COLS, LINES - 2, 0);
   if(g_statuswnd) {
     wattrset(g_statuswnd, COLOR_PAIR(1));
     waddstr(g_statuswnd, "Status window");
     wnoutrefresh(g_statuswnd);
+  }
+  g_inputwnd = newwin(1, COLS, LINES - 1, 0);
+  if(g_inputwnd) {
+    //wattrset(g_statuswnd, COLOR_PAIR(1));
+    waddstr(g_inputwnd, "Input window");
+    wnoutrefresh(g_inputwnd);
   }
 
   doupdate();
