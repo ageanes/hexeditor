@@ -32,8 +32,6 @@ struct _gap_buffer {
   int gap_begin;
   int gap_end;
   int cursor;
-
-  struct _gap_buffer *next;
 };
 
 typedef struct _gap_buffer gap_buffer;
