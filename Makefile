@@ -1,6 +1,6 @@
 PROGRAM := hexeditor
 
-CFLAGS:=-lncurses
+CFLAGS:=-lncurses -fpie -Wl,-z,relro
 
 ifdef DEBUG
 	CFLAGS := $(CFLAGS) -g
@@ -13,7 +13,7 @@ OBJS = main.o $(SRCFILES:%.c=%.o)
 DEPS = $(OBJS:%.o=%.d)
 
 $(PROGRAM): $(OBJS)
-	$(CC) -o $@ $(CFLAGS) $<
+	$(CC) -o $@ $(CFLAGS) $^
 
 -include $(DEPS)
 

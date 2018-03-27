@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <ctype.h>
 #include <malloc.h>
-#include "gap_buffer.h"
+#include "../gap_buffer.h"
 
 #define check_assert_with_fail(expr, msg, fail) \
  do { \
