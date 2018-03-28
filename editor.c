@@ -2,11 +2,15 @@
 
 #include "command_mode.h"
 #include "insert_mode.h"
+#include "logger.h"
 
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h> 
+#include <stdlib.h> 
+#include <limits.h>
+#include <assert.h>
 
 #include <ctype.h>
 
@@ -21,14 +25,12 @@ mode_ops g_modes[] = {
     "command",
     cmd_mode_enter,
     cmd_mode_new_char,
-    cmd_mode_place_cursor,
     cmd_mode_exit
   },
   {
     "insert",
     insert_mode_enter,
     insert_mode_new_char,
-    insert_mode_place_cursor,
     insert_mode_exit
   },
   {
@@ -39,16 +41,22 @@ mode_ops g_modes[] = {
   }
 };
 
-editor_status g_editor_status = { 
+editor_status g_editor = { 
   .mode = MODE_COMMAND,
-  .buf = {
+  .data = {
     .lines = NULL,
     .linebuf = NULL,
     .linebuf_len = 0
   },
-  .firstline = NULL,
-  .firstline_number = 0,
-  .curline = NULL,
+  .screen = {
+    .focus = NULL,
+    .firstline = NULL,
+    .firstline_number = 0,
+    .lastline = NULL,
+    .lastline_number = 0,
+    .curline = NULL,
+    .curline_number = 0
+  }
 };
 
 file_info g_curfile = { 
@@ -59,6 +67,16 @@ file_info g_curfile = {
   .mm_offset = 0, 
   .mm_len = 0 
 };
+
+int editor_line_list_len() {
+  int n = 0;
+  struct editor_line *el = g_editor.screen.firstline;
+  while(el) {
+    ++n;
+    el = el->next;
+  }
+  return n;
+}
 
 // functions
 
@@ -97,25 +115,31 @@ int setup_curses() {
 int setup_windows() {
   g_windows.mainwnd = newwin(LINES - 2, COLS, 0, 0);
   if(g_windows.mainwnd) {
-    //wkbgdset(g_windows.mainwnd, 0);
     wbkgdset(g_windows.mainwnd, 0);
-    waddstr(g_windows.mainwnd, "Main window");
     wnoutrefresh(g_windows.mainwnd);
   }
   g_windows.statuswnd = newwin(1, COLS, LINES - 2, 0);
   if(g_windows.statuswnd) {
     wattrset(g_windows.statuswnd, COLOR_PAIR(1));
-    waddstr(g_windows.statuswnd, "Status window");
     wnoutrefresh(g_windows.statuswnd);
   }
   g_windows.inputwnd = newwin(1, COLS, LINES - 1, 0);
   if(g_windows.inputwnd) {
     //wattrset(g_windows.statuswnd, COLOR_PAIR(1));
-    waddstr(g_windows.inputwnd, "Input window");
     wnoutrefresh(g_windows.inputwnd);
   }
 
   if(g_windows.mainwnd && g_windows.statuswnd && g_windows.inputwnd) {
+    editor_update_window_sizes();
+
+    // set up the line buffer for the screen
+    char *new_linebuf = malloc(COLS);
+    if(!new_linebuf) {
+      return false;
+    }
+    g_editor.screen.linebuf = new_linebuf;
+    g_editor.screen.linebuf_len = COLS;
+
     werase(stdscr);
     werase(g_windows.mainwnd);
     werase(g_windows.statuswnd);
@@ -181,49 +205,61 @@ int open_file(const char *filename) {
 int setup_editor() {
   size_t bmark = 0, emark = 0;
   struct editor_line *last_line = NULL;
+  size_t lineno = 0;
 
+  // read through file data and separate into lines
+  // each line in the file is assigned to one gap buffer
   while(bmark < g_curfile.mm_len) {
+
+    // find the next instance of a newline
     while(emark < g_curfile.mm_len && g_curfile.mm[emark++] != '\n');
+
+    // create a gap buffer for the current line
     gap_buffer *gb = gap_buffer_new(emark - bmark);
-    if(gb) {
-      struct editor_line *el = malloc(sizeof(struct editor_line));
-      if(el) {
-        el->gb = gb;
-        el->next = NULL;
-        el->prev = last_line;
-        if(last_line) {
-          last_line->next = el;
-        } else {
-          g_editor_status.buf.lines = el;
-
-          g_editor_status.firstline = el;
-          g_editor_status.curline = el;
-          g_editor_status.firstline_number = 1;
-          g_editor_status.screen_curline = 0;
-        }
-        last_line = el;
-
-        for(size_t i = bmark; i < emark; ++i) {
-          gap_buffer_addch(gb, g_curfile.mm[i]);
-        }
-        gap_buffer_setpos(gb, 0);
-      } else {
-        gap_buffer_delete(gb);
-        gb = NULL;
-      }
+    if(!gb) {
+      return false;
     }
+
+    struct editor_line *el = malloc(sizeof(struct editor_line));
+    if(!el) {
+      gap_buffer_delete(gb);
+      gb = NULL;
+      return false;
+    }
+
+    el->gb = gb;
+    el->next = NULL;
+    el->prev = last_line;
+
+    if(last_line) {
+      last_line->next = el;
+    } else {
+      // set up the editor state if this is the first line
+      g_editor.data.lines = el;
+      g_editor.data.firstline = el;
+
+      g_editor.data.firstline = el;
+      g_editor.data.firstline_number = 0;
+    }
+    last_line = el;
+
+    // load data into the gap buffer
+    for(size_t i = bmark; i < emark; ++i) {
+      gap_buffer_addch(gb, g_curfile.mm[i]);
+    }
+    gap_buffer_setcursor(gb, 0);
+
     bmark = emark;
   }
 
-  g_editor_status.buf.linebuf = malloc(COLS);
-  if(g_editor_status.buf.linebuf) {
-    g_editor_status.buf.linebuf_len = COLS;
-  }
+  assert(g_editor.screen.linebuf);
+
+  g_editor.screen.focus = g_windows.mainwnd;
   return true;
 }
 
 void cleanup_editor() {
-  struct editor_line *el = g_editor_status.buf.lines;
+  struct editor_line *el = g_editor.data.lines;
   while(el) {
     struct editor_line *next = el->next;
     if(el->gb) {
@@ -234,9 +270,10 @@ void cleanup_editor() {
     el = next;
   }
 
-  g_editor_status.buf.lines = NULL;
-  g_editor_status.firstline = NULL;
-  g_editor_status.curline = NULL;
+  g_editor.data.lines = NULL;
+  g_editor.screen.firstline = NULL;
+  g_editor.lastline = NULL;
+  g_editor.screen.curline = NULL;
 }
 
 void cleanup_file() {
@@ -262,6 +299,20 @@ void cleanup_windows() {
   if(g_windows.mainwnd) delwin(g_windows.mainwnd);
   if(g_windows.inputwnd) delwin(g_windows.inputwnd);
   if(g_windows.statuswnd) delwin(g_windows.statuswnd);
+}
+
+void editor_set_focus(WINDOW *window) {
+  g_editor.screen.focus = window;
+}
+
+void editor_place_cursor() {
+  if(!g_editor.screen.focus) {
+    return;
+  }
+  int y, x, by, bx;
+  getyx(g_editor.screen.focus, y, x);
+  getbegyx(g_editor.screen.focus, by, bx);
+  move(by+y, bx+x);
 }
 
 void clear_status_window() {
@@ -300,78 +351,125 @@ int editor_switch_mode(int to_mode) {
     return -1;
   }
 
-  if(to_mode == g_editor_status.mode) {
+  if(to_mode == g_editor.mode) {
     return r;
   }
 
-  if(g_editor_status.mode >= MODE_COMMAND && g_editor_status.mode < NUMBER_MODES) {
-    if(g_modes[g_editor_status.mode].exit_mode() < 0) {
+  if(g_editor.mode >= MODE_COMMAND && g_editor.mode < NUMBER_MODES) {
+    if(g_modes[g_editor.mode].exit_mode() < 0) {
       r = -1;
     }
   }
-  g_editor_status.mode = to_mode;
-  if(g_modes[g_editor_status.mode].enter_mode() < 0) {
+  g_editor.mode = to_mode;
+  if(g_modes[g_editor.mode].enter_mode() < 0) {
     r = -1;
   }
 
   clear_input_window();
-  set_status_window_text(g_modes[g_editor_status.mode].mode_name);
+  set_status_window_text(g_modes[g_editor.mode].mode_name);
 
   return r;
 }
 
-int editor_resize_windows() {
+int screen_lines_in_buffer(struct editor_line *line) {
+  int n = 0;
+  if(!line || !line->gb) {
+    return n;
+  }
+
+  int line_len = line->gb->len;
+
+  // round the line length up to the nearest multiple of the main window width
+  line_len += g_windows.mainwnd_geom.w - 1;
+  n = line_len / g_windows.mainwnd_geom.w;
+
+  return n;
+}
+
+void editor_update_window_sizes() {
   wresize(g_windows.mainwnd, LINES - 2, COLS);
   mvwin(g_windows.mainwnd, 0, 0);
+  getbegyx(g_windows.mainwnd, g_windows.mainwnd_geom.y, g_windows.mainwnd_geom.x);
+  getmaxyx(g_windows.mainwnd, g_windows.mainwnd_geom.h, g_windows.mainwnd_geom.w);
 
   wresize(g_windows.statuswnd, 1, COLS);
   mvwin(g_windows.statuswnd, LINES - 2, 0);
+  getbegyx(g_windows.statuswnd, g_windows.statuswnd_geom.y, g_windows.statuswnd_geom.x);
+  getmaxyx(g_windows.statuswnd, g_windows.statuswnd_geom.h, g_windows.statuswnd_geom.w);
 
   wresize(g_windows.inputwnd, 1, COLS);
   mvwin(g_windows.inputwnd, LINES - 1, 0);
+  getbegyx(g_windows.inputwnd, g_windows.inputwnd_geom.y, g_windows.inputwnd_geom.x);
+  getmaxyx(g_windows.inputwnd, g_windows.inputwnd_geom.h, g_windows.inputwnd_geom.w);
+}
 
-  if(g_editor_status.buf.linebuf) {
-    char *new_linebuf = realloc(g_editor_status.buf.linebuf, COLS);
-    if(new_linebuf) {
-      g_editor_status.buf.linebuf = new_linebuf;
-      g_editor_status.buf.linebuf_len = COLS;
-    } else {
-      return -1;
-    }
-  } else {
-    char *new_linebuf = malloc(COLS);
-    if(new_linebuf) {
-      g_editor_status.buf.linebuf = new_linebuf;
-      g_editor_status.buf.linebuf_len = COLS;
-    } else {
-      return -1;
-    }
+int editor_resize_windows() {
+
+  editor_update_window_sizes();
+
+  char *new_linebuf = realloc(g_editor.data.linebuf, COLS);
+  if(!new_linebuf) {
+    return -1;
   }
 
-  editor_refresh_main_window();
+  g_editor.data.linebuf = new_linebuf;
+  g_editor.data.linebuf_len = g_windows.mainwnd_geom.w;
+
+  struct editor_line *el = g_editor.screen.firstline;
+  int lineno = 0;
+
+  while(el && el->next && lineno < g_windows.mainwnd_geom.h) {
+    el = el->next;
+    ++lineno;
+  }
+
+  g_editor.lastline = el;
+  g_editor.screen.lastline_number = g_editor.screen.firstline_number + lineno;
+
+  if(g_editor.screen.curline_number > g_editor.screen.lastline_number) {
+
+    int curpos = g_editor.screen.curline_cursor;
+    if(g_editor.screen.curline && g_editor.screen.curline->gb) {
+      curpos = gap_buffer_getcursor(g_editor.screen.curline->gb);
+    }
+
+    g_editor.screen.curline = g_editor.lastline;
+    g_editor.screen.curline_number = g_editor.screen.lastline_number;
+
+    if(g_editor.screen.curline && g_editor.screen.curline->gb) {
+      int new_curpos = gap_buffer_getcursor(g_editor.screen.curline->gb);
+      curpos = new_curpos < curpos ? new_curpos : curpos;
+    } else {
+      curpos = 0;
+    }
+
+    g_editor.screen.curline_cursor = curpos;
+
+  }
+
+  editor_refresh_main_window_full();
 
   return 0;
 }
 
 void editor_update_windows() {
-  if(g_editor_status.mode >= MODE_COMMAND 
-      && g_editor_status.mode < NUMBER_MODES
-      && g_modes[g_editor_status.mode].place_cursor) {
-    g_modes[g_editor_status.mode].place_cursor();
-  }
+
   wnoutrefresh(stdscr);
   wnoutrefresh(g_windows.mainwnd);
   wnoutrefresh(g_windows.statuswnd);
   wnoutrefresh(g_windows.inputwnd);
+
+  editor_place_cursor();
+
   doupdate();
 }
 
-void editor_refresh_main_window() {
+void editor_refresh_main_window_full() {
   int mx, my, cx, cy, cur_line = 0;
 
   werase(g_windows.mainwnd);
 
-  if(!g_editor_status.buf.linebuf) {
+  if(!g_editor.data.linebuf) {
     editor_update_windows();
     return;
   }
@@ -379,9 +477,10 @@ void editor_refresh_main_window() {
   getmaxyx(g_windows.mainwnd, my, mx);
   wmove(g_windows.mainwnd, 0, 0);
 
-  struct editor_line *el = g_editor_status.firstline;
-  char *linebuf = g_editor_status.buf.linebuf;
-  size_t linebuf_len = g_editor_status.buf.linebuf_len;
+  struct editor_line *el = g_editor.screen.firstline;
+  char *linebuf = g_editor.data.linebuf;
+  size_t linebuf_len = g_editor.data.linebuf_len;
+
   while(el && cur_line < my) {
     int n_copied = gap_buffer_copy(el->gb, linebuf, linebuf_len);
     for(int i = 0; i < n_copied; ++i) {
@@ -396,11 +495,92 @@ void editor_refresh_main_window() {
     ++cur_line;
   }
 
+  // todo make this work with long lines
+  wmove(g_windows.mainwnd, 
+      g_editor.screen.curline_number - g_editor.screen.firstline_number, 
+      g_editor.screen.curline_cursor < mx ? g_editor.screen.curline_cursor : mx);
+
   editor_update_windows();
 }
 
-void editor_line_down() {
+long editor_get_top_line() {
+  return g_editor.screen.firstline_number;
 }
 
-void editor_line_up() {
+long editor_goto_line(long line) {
+  int mx, my;
+  getmaxyx(g_windows.mainwnd, my, mx); // max rows and columns we can use
+
+  line = line >= 0 ? line : 0;
+
+  struct editor_line *el = g_editor.screen.firstline;
+  size_t lineno = g_editor.screen.firstline_number;
+
+  if(line > g_editor.screen.firstline_number) {
+    while(g_editor.screen.firstline 
+        && g_editor.screen.firstline->next 
+        && g_editor.screen.firstline_number < line) 
+    {
+      g_editor.screen.firstline = g_editor.screen.firstline->next;
+      ++g_editor.screen.firstline_number;
+    }
+  } else { // i.e. line <= screen.firstline_number
+    while(g_editor.screen.firstline 
+        && g_editor.screen.firstline->prev
+        && g_editor.screen.firstline_number > line) {
+      g_editor.screen.firstline = g_editor.screen.firstline->prev;
+      --g_editor.screen.firstline_number;
+    }
+  }
+
+  if(g_editor.screen.curline_number < g_editor.screen.firstline_number) {
+    g_editor.screen.curline_number = g_editor.screen.firstline_number;
+    g_editor.screen.curline = g_editor.screen.firstline;
+  } else {
+    struct editor_line *el = g_editor.screen.firstline;
+    size_t screen_line = 0;
+    while(el && el->next && screen_line < my) {
+      el = el->next;
+      ++screen_line;
+    }
+
+    g_editor.screen.curline = el;
+    g_editor.screen.curline_number = g_editor.screen.firstline_number + screen_line;
+  }
+
+  editor_refresh_main_window_full();
+  return g_editor.screen.firstline_number;
+}
+
+void editor_char_left_main() {
+  if(!g_editor.screen.curline || !g_editor.screen.curline->gb) {
+    return;
+  }
+  gap_buffer *gb = g_editor.screen.curline->gb;
+  int pos = gap_buffer_getcursor(gb);
+  if(pos > 0) {
+    --pos;
+    gap_buffer_setcursor(gb, pos);
+    g_editor.screen.curline_cursor = gap_buffer_getcursor(gb);
+  }
+}
+
+void editor_char_right_main() {
+  if(!g_editor.screen.curline || !g_editor.screen.curline->gb) {
+    return;
+  }
+
+  gap_buffer *gb = g_editor.screen.curline->gb;
+  int pos = gap_buffer_getcursor(gb);
+  if(pos < INT_MAX) {
+    ++pos;
+    gap_buffer_setcursor(gb, pos);
+    g_editor.screen.curline_cursor = gap_buffer_getcursor(gb);
+  }
+}
+
+void editor_line_down_main() {
+}
+
+void editor_line_up_main() {
 }

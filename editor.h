@@ -5,10 +5,20 @@
 
 #include <ncurses.h>
 
+struct _editor_window_geom {
+  int x, y; // absolute x and y coords of upper left corner
+  int w, h; // width and height of window
+};
+
 struct _editor_window {
   WINDOW *mainwnd;
+  struct _editor_window_geom mainwnd_geom;
+
   WINDOW *statuswnd;
+  struct _editor_window_geom statuswnd_geom;
+
   WINDOW *inputwnd;
+  struct _editor_window_geom inputwnd_geom;
 };
 typedef struct _editor_window editor_window;
 
@@ -39,19 +49,31 @@ struct _editor_status {
   struct {
     struct editor_line *lines;
 
+    struct editor_line *firstline;
+    struct editor_line *lastline;
+
+    size_t n_lines;
+  } data;
+
+  struct {
+    WINDOW *focus;
+    struct editor_line *firstline; // first line displayed on the screen
+    size_t firstline_number;
+    struct editor_line *lastline; // last line displayed on the screen
+    size_t lastline_number;
+    struct editor_line *curline; // line holding the current cursor
+    size_t curline_number;
+    size_t curline_cursor; // where on the line the cursor should be placed
+
+    // a buffer that is the width of the windows
     char *linebuf;
     size_t linebuf_len;
-  } buf;
+  } screen;
 
-  struct editor_line *firstline; // first line on the screen
-  size_t firstline_number;
-
-  struct editor_line *curline; // current line
-  size_t screen_curline;
 };
 typedef struct _editor_status editor_status;
 
-extern editor_status g_editor_status;
+extern editor_status g_editor;
 
 enum _command_modes {
   MODE_COMMAND = 0,
@@ -63,7 +85,6 @@ struct _mode_ops {
   const char *mode_name;
   int (*enter_mode)();
   int (*new_char)(int c);
-  int (*place_cursor)();
   int (*exit_mode)();
 };
 typedef struct _mode_ops mode_ops;
@@ -84,6 +105,9 @@ void cleanup_file();
 void cleanup_windows();
 void cleanup_curses();
 
+void editor_set_focus(WINDOW *window);
+void editor_place_cursor();
+
 // functionality
 void clear_status_window();
 void set_status_window_text(const char *str);
@@ -96,9 +120,21 @@ void append_input_window_char(char c);
 
 int editor_switch_mode(int to_mode);
 
+void editor_update_window_sizes();
 int editor_resize_windows();
 void editor_update_windows();
-void editor_refresh_main_window();
+void editor_refresh_main_window_full();
+
+long editor_get_top_line(); // get the first line displayed on the editor window
+
+// set 'line' as the first line on the screen.
+// return the first line displayed on the screen (may be < line)
+long editor_goto_line(long line); 
+
+void editor_char_left_main();
+void editor_char_right_main();
+void editor_line_down_main();
+void editor_line_up_main();
 
 void editor_update_line();
 

@@ -12,6 +12,7 @@
 
 #include "main.h"
 #include "editor.h"
+#include "logger.h"
 
 const char *g_progname;
 
@@ -25,6 +26,10 @@ int main(int argc, char *argv[]) {
   if(argc < 2) {
     usage();
     return -1;
+  }
+
+  if(!setup_logger("log.txt")) {
+    fprintf(stderr, "Could not set up logging facilities\n");
   }
 
   if(!setup_curses()) {
@@ -53,15 +58,15 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  g_editor_status.mode = MODE_COMMAND - 1;
+  g_editor.mode = MODE_COMMAND - 1;
   editor_switch_mode(MODE_COMMAND);
 
-  waddstr(g_windows.mainwnd, "Press 'q' in command mode to quit.  For command mode press escape.\n\nPress any key to continue.");
+  waddstr(g_windows.mainwnd, "Press 'q' in command mode to quit.  "
+      "For command mode press escape.\n\nPress any key to continue.");
   editor_update_windows();
   getch();
 
-  editor_refresh_main_window();
-  editor_refresh_main_window();
+  editor_refresh_main_window_full();
 
   editor_update_windows();
 
@@ -76,7 +81,7 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    r = g_modes[g_editor_status.mode].new_char(c);
+    r = g_modes[g_editor.mode].new_char(c);
 
     editor_update_windows();
 
@@ -85,19 +90,19 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  //delwin(mywin);
   cleanup_file();
   cleanup_windows();
   cleanup_curses();
+  cleanup_logger();
   return 0;
 }
 
 void usage() {
-  fprintf
-  (
+  fprintf(
     stderr, 
     "Usage: %s <file>\n"
       "  <file> the file you wish to view/edit\n",
-    g_progname);
+    g_progname
+  );
 }
 
