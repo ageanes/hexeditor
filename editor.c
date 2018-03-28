@@ -45,8 +45,9 @@ editor_status g_editor = {
   .mode = MODE_COMMAND,
   .data = {
     .lines = NULL,
-    .linebuf = NULL,
-    .linebuf_len = 0
+    .firstline = NULL,
+    .lastline = NULL,
+    .n_lines = 0
   },
   .screen = {
     .focus = NULL,
@@ -55,7 +56,9 @@ editor_status g_editor = {
     .lastline = NULL,
     .lastline_number = 0,
     .curline = NULL,
-    .curline_number = 0
+    .curline_number = 0,
+    .linebuf = NULL,
+    .linebuf_len = 0
   }
 };
 
@@ -113,42 +116,42 @@ int setup_curses() {
 }
 
 int setup_windows() {
+  // main window, full screen height - 2, full screen width
   g_windows.mainwnd = newwin(LINES - 2, COLS, 0, 0);
   if(g_windows.mainwnd) {
     wbkgdset(g_windows.mainwnd, 0);
     wnoutrefresh(g_windows.mainwnd);
   }
+  
+  // status window, 1 character high, full width of screen, below main window
   g_windows.statuswnd = newwin(1, COLS, LINES - 2, 0);
   if(g_windows.statuswnd) {
     wattrset(g_windows.statuswnd, COLOR_PAIR(1));
     wnoutrefresh(g_windows.statuswnd);
   }
-  g_windows.inputwnd = newwin(1, COLS, LINES - 1, 0);
+  
+  // input window, 1 character high, full width of screen, below status window
+  g_windows.inputwnd = newwin(1, COLS, LINES - 1, 0); 
   if(g_windows.inputwnd) {
-    //wattrset(g_windows.statuswnd, COLOR_PAIR(1));
     wnoutrefresh(g_windows.inputwnd);
   }
 
-  if(g_windows.mainwnd && g_windows.statuswnd && g_windows.inputwnd) {
-    editor_update_window_sizes();
-
-    // set up the line buffer for the screen
-    char *new_linebuf = malloc(COLS);
-    if(!new_linebuf) {
-      return false;
-    }
-    g_editor.screen.linebuf = new_linebuf;
-    g_editor.screen.linebuf_len = COLS;
-
-    werase(stdscr);
-    werase(g_windows.mainwnd);
-    werase(g_windows.statuswnd);
-    werase(g_windows.inputwnd);
+  if(!g_windows.mainwnd || !g_windows.statuswnd || !g_windows.inputwnd) {
+    return false;
   }
+
+  // update window sizes in editor structures
+  editor_update_window_sizes();
+
+  // clear the screens
+  werase(stdscr);
+  werase(g_windows.mainwnd);
+  werase(g_windows.statuswnd);
+  werase(g_windows.inputwnd);
 
   doupdate();
 
-  return g_windows.mainwnd && g_windows.inputwnd && g_windows.statuswnd;
+  return true;
 }
 
 void cleanup_curses() {
@@ -205,7 +208,7 @@ int open_file(const char *filename) {
 int setup_editor() {
   size_t bmark = 0, emark = 0;
   struct editor_line *last_line = NULL;
-  size_t lineno = 0;
+  size_t n_lines = 0;
 
   // read through file data and separate into lines
   // each line in the file is assigned to one gap buffer
@@ -237,29 +240,57 @@ int setup_editor() {
       // set up the editor state if this is the first line
       g_editor.data.lines = el;
       g_editor.data.firstline = el;
-
-      g_editor.data.firstline = el;
-      g_editor.data.firstline_number = 0;
     }
-    last_line = el;
 
-    // load data into the gap buffer
-    for(size_t i = bmark; i < emark; ++i) {
+    // load data into the gap buffer, skip the newline at the end
+    for(size_t i = bmark; i < emark - 1; ++i) {
       gap_buffer_addch(gb, g_curfile.mm[i]);
     }
     gap_buffer_setcursor(gb, 0);
 
+    last_line = el;
+    ++n_lines;
     bmark = emark;
   }
+  g_editor.data.lastline = last_line;
+  g_editor.data.n_lines = n_lines;
 
-  assert(g_editor.screen.linebuf);
+  // set up the line buffer for the screen
+  assert(!g_editor.screen.linebuf);
+  char *new_linebuf = malloc(g_windows.mainwnd_geom.w);
+  if(!new_linebuf) {
+    return false;
+  }
+  g_editor.screen.linebuf = new_linebuf;
+  g_editor.screen.linebuf_len = g_windows.mainwnd_geom.w;
 
   g_editor.screen.focus = g_windows.mainwnd;
+
+  editor_goto_line_scan(0);
+
   return true;
 }
 
 void cleanup_editor() {
   struct editor_line *el = g_editor.data.lines;
+  char *linebuf = g_editor.screen.linebuf;
+
+  g_editor.data.lines = NULL;
+  g_editor.data.firstline = NULL;
+  g_editor.data.lastline = NULL;
+  g_editor.data.n_lines = 0;
+
+  g_editor.screen.focus = NULL;
+  g_editor.screen.firstline = NULL;
+  g_editor.screen.firstline_number = 0;
+  g_editor.screen.lastline = NULL;
+  g_editor.screen.lastline_number = 0;
+  g_editor.screen.curline = NULL;
+  g_editor.screen.curline_number = 0;
+
+  g_editor.screen.linebuf = NULL;
+  g_editor.screen.linebuf_len = 0;
+
   while(el) {
     struct editor_line *next = el->next;
     if(el->gb) {
@@ -270,10 +301,10 @@ void cleanup_editor() {
     el = next;
   }
 
-  g_editor.data.lines = NULL;
-  g_editor.screen.firstline = NULL;
-  g_editor.lastline = NULL;
-  g_editor.screen.curline = NULL;
+  if(linebuf) {
+    free(linebuf);
+  }
+
 }
 
 void cleanup_file() {
@@ -373,13 +404,14 @@ int editor_switch_mode(int to_mode) {
 
 int screen_lines_in_buffer(struct editor_line *line) {
   int n = 0;
-  if(!line || !line->gb) {
+  if(!line || !line->gb || g_windows.mainwnd_geom.w == 0) {
     return n;
   }
 
   int line_len = line->gb->len;
 
   // round the line length up to the nearest multiple of the main window width
+  // then divide by the 
   line_len += g_windows.mainwnd_geom.w - 1;
   n = line_len / g_windows.mainwnd_geom.w;
 
@@ -387,6 +419,16 @@ int screen_lines_in_buffer(struct editor_line *line) {
 }
 
 void editor_update_window_sizes() {
+  // windows are arranged:
+  // ----------
+  //
+  //    main 
+  //
+  // --status--
+  // --input---
+  //
+  // All windows are full screen width
+  //
   wresize(g_windows.mainwnd, LINES - 2, COLS);
   mvwin(g_windows.mainwnd, 0, 0);
   getbegyx(g_windows.mainwnd, g_windows.mainwnd_geom.y, g_windows.mainwnd_geom.x);
@@ -407,23 +449,26 @@ int editor_resize_windows() {
 
   editor_update_window_sizes();
 
-  char *new_linebuf = realloc(g_editor.data.linebuf, COLS);
-  if(!new_linebuf) {
+  char *new_linebuf = realloc(g_editor.screen.linebuf, g_windows.mainwnd_geom.w);
+  if(g_windows.mainwnd_geom.w && !new_linebuf) { // check for 0-length buffer if width > 0
     return -1;
   }
+  g_editor.screen.linebuf = new_linebuf;
+  g_editor.screen.linebuf_len = g_windows.mainwnd_geom.w;
 
-  g_editor.data.linebuf = new_linebuf;
-  g_editor.data.linebuf_len = g_windows.mainwnd_geom.w;
-
+  // determine what lines are displayed on screen
+  
   struct editor_line *el = g_editor.screen.firstline;
   int lineno = 0;
 
-  while(el && el->next && lineno < g_windows.mainwnd_geom.h) {
+  // lastline is the last line displayed on screen, so we want to stop on that line
+  int dest_line = g_windows.mainwnd_geom.h ? g_windows.mainwnd_geom.h - 1 : 0;
+  while(el && el->next && lineno < g_windows.mainwnd_geom.h ) {
     el = el->next;
     ++lineno;
   }
 
-  g_editor.lastline = el;
+  g_editor.screen.lastline = el;
   g_editor.screen.lastline_number = g_editor.screen.firstline_number + lineno;
 
   if(g_editor.screen.curline_number > g_editor.screen.lastline_number) {
@@ -433,7 +478,7 @@ int editor_resize_windows() {
       curpos = gap_buffer_getcursor(g_editor.screen.curline->gb);
     }
 
-    g_editor.screen.curline = g_editor.lastline;
+    g_editor.screen.curline = g_editor.screen.lastline;
     g_editor.screen.curline_number = g_editor.screen.lastline_number;
 
     if(g_editor.screen.curline && g_editor.screen.curline->gb) {
@@ -447,12 +492,12 @@ int editor_resize_windows() {
 
   }
 
-  editor_refresh_main_window_full();
+  editor_redraw_main_window_full();
 
   return 0;
 }
 
-void editor_update_windows() {
+void editor_refresh_windows() {
 
   wnoutrefresh(stdscr);
   wnoutrefresh(g_windows.mainwnd);
@@ -464,13 +509,13 @@ void editor_update_windows() {
   doupdate();
 }
 
-void editor_refresh_main_window_full() {
+void editor_redraw_main_window_full() {
   int mx, my, cx, cy, cur_line = 0;
 
   werase(g_windows.mainwnd);
 
-  if(!g_editor.data.linebuf) {
-    editor_update_windows();
+  if(!g_editor.screen.linebuf) {
+    editor_refresh_windows();
     return;
   }
 
@@ -478,9 +523,10 @@ void editor_refresh_main_window_full() {
   wmove(g_windows.mainwnd, 0, 0);
 
   struct editor_line *el = g_editor.screen.firstline;
-  char *linebuf = g_editor.data.linebuf;
-  size_t linebuf_len = g_editor.data.linebuf_len;
+  char *linebuf = g_editor.screen.linebuf;
+  size_t linebuf_len = g_editor.screen.linebuf_len;
 
+  cx = 0;
   while(el && cur_line < my) {
     int n_copied = gap_buffer_copy(el->gb, linebuf, linebuf_len);
     for(int i = 0; i < n_copied; ++i) {
@@ -490,65 +536,77 @@ void editor_refresh_main_window_full() {
         waddch(g_windows.mainwnd, ' ');
       }
     }
-    wmove(g_windows.mainwnd, getcury(g_windows.mainwnd) + 1, 0);
+
+    if(wmove(g_windows.mainwnd, ++cx, 0) == ERR) {
+      break;
+    }
     el = el->next;
     ++cur_line;
   }
 
-  // todo make this work with long lines
-  wmove(g_windows.mainwnd, 
-      g_editor.screen.curline_number - g_editor.screen.firstline_number, 
-      g_editor.screen.curline_cursor < mx ? g_editor.screen.curline_cursor : mx);
+  int curs_pos = g_editor.screen.curline_cursor >= 0 ? g_editor.screen.curline_cursor : 0; 
+  if(g_editor.screen.curline 
+      && g_editor.screen.curline->gb) 
+  {
+    gap_buffer_setcursor(g_editor.screen.curline->gb, curs_pos);
+    curs_pos = curs_pos < gap_buffer_getcursor(g_editor.screen.curline->gb) 
+                ? curs_pos 
+                : gap_buffer_getcursor(g_editor.screen.curline->gb);
+  }
 
-  editor_update_windows();
+  if(wmove(g_windows.mainwnd, 
+            g_editor.screen.curline_number - g_editor.screen.firstline_number, // should always be < my
+            curs_pos < mx ? curs_pos : mx - 1) == ERR) 
+  {
+    LOG_MSG("Moving cursor to %d,%d failed, width: %d, height: %d", g_editor.screen.curline_number - g_editor.screen.firstline_number, curs_pos < mx ? curs_pos : mx, getmaxx(stdscr), getmaxy(stdscr));
+  }
+
+  editor_refresh_windows();
 }
 
 long editor_get_top_line() {
   return g_editor.screen.firstline_number;
 }
 
-long editor_goto_line(long line) {
-  int mx, my;
-  getmaxyx(g_windows.mainwnd, my, mx); // max rows and columns we can use
-
-  line = line >= 0 ? line : 0;
-
-  struct editor_line *el = g_editor.screen.firstline;
-  size_t lineno = g_editor.screen.firstline_number;
-
-  if(line > g_editor.screen.firstline_number) {
-    while(g_editor.screen.firstline 
-        && g_editor.screen.firstline->next 
-        && g_editor.screen.firstline_number < line) 
-    {
-      g_editor.screen.firstline = g_editor.screen.firstline->next;
-      ++g_editor.screen.firstline_number;
-    }
-  } else { // i.e. line <= screen.firstline_number
-    while(g_editor.screen.firstline 
-        && g_editor.screen.firstline->prev
-        && g_editor.screen.firstline_number > line) {
-      g_editor.screen.firstline = g_editor.screen.firstline->prev;
-      --g_editor.screen.firstline_number;
-    }
+long editor_goto_line_scan(long dest_line) {
+  struct editor_line *el = g_editor.screen.firstline 
+                            ? g_editor.screen.firstline 
+                            : g_editor.data.firstline;
+  if(dest_line < 0) {
+    dest_line = 0;
   }
 
-  if(g_editor.screen.curline_number < g_editor.screen.firstline_number) {
-    g_editor.screen.curline_number = g_editor.screen.firstline_number;
-    g_editor.screen.curline = g_editor.screen.firstline;
-  } else {
-    struct editor_line *el = g_editor.screen.firstline;
-    size_t screen_line = 0;
-    while(el && el->next && screen_line < my) {
-      el = el->next;
-      ++screen_line;
-    }
+  long cur_line = 0;
+  while(el && el->next && cur_line < dest_line) {
+    el = el->next;
+    ++cur_line;
+  }
+  g_editor.screen.firstline = el;
+  g_editor.screen.firstline_number = cur_line;
 
-    g_editor.screen.curline = el;
-    g_editor.screen.curline_number = g_editor.screen.firstline_number + screen_line;
+  // lastline is inclusive, so we want to stop at height - 1 additonal lines
+  dest_line += g_windows.mainwnd_geom.h ? g_windows.mainwnd_geom.h - 1 : 0; 
+
+  long new_curline_number = g_editor.screen.curline_number;
+
+  if(new_curline_number < g_editor.screen.firstline_number) {
+    new_curline_number = g_editor.screen.firstline_number;
+  } else if(g_editor.screen.curline_number > dest_line) {
+    new_curline_number = dest_line;
   }
 
-  editor_refresh_main_window_full();
+  while(el && el->next && cur_line < dest_line) {
+    if(cur_line <= new_curline_number) {
+      g_editor.screen.curline = el;
+      g_editor.screen.curline_number = cur_line;
+    }
+    el = el->next;
+    ++cur_line;
+  }
+
+  g_editor.screen.lastline = el;
+  g_editor.screen.lastline_number = cur_line;
+
   return g_editor.screen.firstline_number;
 }
 
@@ -557,12 +615,18 @@ void editor_char_left_main() {
     return;
   }
   gap_buffer *gb = g_editor.screen.curline->gb;
-  int pos = gap_buffer_getcursor(gb);
-  if(pos > 0) {
-    --pos;
-    gap_buffer_setcursor(gb, pos);
+
+  int buf_len = gap_buffer_length(gb);
+  if(g_editor.screen.curline_cursor > buf_len) {
+    g_editor.screen.curline_cursor = buf_len;
+  }
+
+  if(g_editor.screen.curline_cursor > 0) {
+    --g_editor.screen.curline_cursor;
+    gap_buffer_setcursor(gb, g_editor.screen.curline_cursor);
     g_editor.screen.curline_cursor = gap_buffer_getcursor(gb);
   }
+  editor_update_cursor_main();
 }
 
 void editor_char_right_main() {
@@ -571,16 +635,74 @@ void editor_char_right_main() {
   }
 
   gap_buffer *gb = g_editor.screen.curline->gb;
-  int pos = gap_buffer_getcursor(gb);
-  if(pos < INT_MAX) {
+
+  int buf_len = gap_buffer_length(gb);
+  if(g_editor.screen.curline_cursor > buf_len) {
+    return;
+  }
+  
+  int pos = g_editor.screen.curline_cursor;
+  if(pos < g_windows.mainwnd_geom.w - 1 ? g_windows.mainwnd_geom.w - 2 : 0) {
     ++pos;
     gap_buffer_setcursor(gb, pos);
     g_editor.screen.curline_cursor = gap_buffer_getcursor(gb);
   }
+  editor_update_cursor_main();
 }
 
+// moves the current line down one line
 void editor_line_down_main() {
+  struct editor_line *el = g_editor.screen.curline;
+  size_t ln = g_editor.screen.curline_number;
+  if(!el || !el->next) {
+    return;
+  }
+  el = el->next;
+  ++ln;
+  
+  // if we're on the last line, scroll the screen down (if possible)
+  if(g_editor.screen.curline == g_editor.screen.lastline) {
+    if(g_editor.screen.lastline->next) {
+      g_editor.screen.firstline = g_editor.screen.firstline->next;
+      ++g_editor.screen.firstline_number;
+    }
+    g_editor.screen.lastline = el;
+    g_editor.screen.lastline_number = ln;
+  }
+
+  g_editor.screen.curline = el;
+  g_editor.screen.curline_number = ln;
+  gap_buffer_setcursor(g_editor.screen.curline->gb, g_editor.screen.curline_cursor);
+
+  editor_update_cursor_main();
 }
 
 void editor_line_up_main() {
+  struct editor_line *el = g_editor.screen.curline;
+  size_t ln = g_editor.screen.curline_number;
+  if(!el || !el->prev) {
+    return;
+  }
+  el = el->prev;
+  --ln;
+  
+  // if we're on the last line, scroll the screen down (if possible)
+  if(g_editor.screen.curline == g_editor.screen.firstline) {
+    if(g_editor.screen.firstline->prev) {
+      g_editor.screen.lastline = g_editor.screen.lastline->prev;
+      --g_editor.screen.lastline_number;
+    }
+    g_editor.screen.firstline = el;
+    g_editor.screen.firstline_number = ln;
+  }
+
+  g_editor.screen.curline = el;
+  g_editor.screen.curline_number = ln;
+  gap_buffer_setcursor(g_editor.screen.curline->gb, g_editor.screen.curline_cursor);
+
+  editor_update_cursor_main();
+}
+
+void editor_update_cursor_main() {
+  editor_redraw_main_window_full();
 }

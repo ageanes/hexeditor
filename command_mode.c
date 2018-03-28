@@ -28,49 +28,29 @@ int cmd_mode_new_char(int c) {
     case KEY_LEFT :
     case 'h':
       {
-        int y, x, my, mx;
-        getyx(g_windows.mainwnd, y, x);
-        getmaxyx(g_windows.mainwnd, my, mx);
-        if(x > 0) {
-          wmove(g_windows.mainwnd, y, x-1);
-        }
-        LOG_MSG("key %d, moved main cursor to %d,%d\n", c, x-1, y);
+        editor_char_left_main();
+        LOG_MSG("key left");
       }
       break;
     case KEY_RIGHT :
     case 'l':
       {
-        int y, x, my, mx;
-        getyx(g_windows.mainwnd, y, x);
-        getmaxyx(g_windows.mainwnd, my, mx);
-        if(x < mx) {
-          wmove(g_windows.mainwnd, y, x+1);
-        }
-        LOG_MSG("key %d, moved main cursor to %d,%d\n", c, x+1, y);
+        editor_char_right_main();
+        LOG_MSG("key right");
       }
       break;
     case KEY_DOWN :
     case 'j':
       {
-        int y, x, my, mx;
-        getyx(g_windows.mainwnd, y, x);
-        getmaxyx(g_windows.mainwnd, my, mx);
-        if(wmove(g_windows.mainwnd, y+1, x) == ERR) {
-          editor_goto_line(editor_get_current_line() + 1);
-        }
-        LOG_MSG("key %d, moved main cursor to %d,%d\n", c, x, y+1);
+        editor_line_down_main();
+        LOG_MSG("Lines: first: %d, current: %d, last: %d", g_editor.screen.firstline_number, g_editor.screen.curline_number, g_editor.screen.lastline_number);
       }
       break;
     case KEY_UP :
     case 'k':
       {
-        int y, x, my, mx;
-        getyx(g_windows.mainwnd, y, x);
-        getmaxyx(g_windows.mainwnd, my, mx);
-        if(wmove(g_windows.mainwnd, y-1, x) == ERR) {
-          editor_goto_line(editor_get_current_line() - 1);
-        }
-        LOG_MSG("key %d, moved main cursor to %d,%d\n", c, x, y-1);
+        editor_line_up_main();
+        LOG_MSG("Lines: first: %d, current: %d, last: %d", g_editor.screen.firstline_number, g_editor.screen.curline_number, g_editor.screen.lastline_number);
       }
       break;
   }

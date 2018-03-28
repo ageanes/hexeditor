@@ -48,10 +48,8 @@ struct _editor_status {
   int mode;
   struct {
     struct editor_line *lines;
-
-    struct editor_line *firstline;
+    struct editor_line *firstline; // should be same as lines
     struct editor_line *lastline;
-
     size_t n_lines;
   } data;
 
@@ -122,20 +120,20 @@ int editor_switch_mode(int to_mode);
 
 void editor_update_window_sizes();
 int editor_resize_windows();
-void editor_update_windows();
-void editor_refresh_main_window_full();
+void editor_refresh_windows();
+void editor_redraw_main_window_full();
 
 long editor_get_top_line(); // get the first line displayed on the editor window
 
 // set 'line' as the first line on the screen.
 // return the first line displayed on the screen (may be < line)
-long editor_goto_line(long line); 
-
+long editor_goto_line_scan(long line); 
 void editor_char_left_main();
 void editor_char_right_main();
 void editor_line_down_main();
 void editor_line_up_main();
 
 void editor_update_line();
+void editor_update_cursor_main();
 
 #endif // __EDITOR_H__
