@@ -3,7 +3,7 @@ PROGRAM := hexeditor
 CFLAGS:=-lncurses -fpie -Wl,-z,relro
 
 ifdef DEBUG
-	CFLAGS := $(CFLAGS) -g
+	CFLAGS := $(CFLAGS) -g -DDEBUG=1
 endif
 
 SRCFILES=$(wildcard *.c)
