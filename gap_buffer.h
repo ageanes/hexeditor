@@ -53,11 +53,14 @@ int _gap_buffer_chkexpand(gap_buffer *gb);
 // shrink the storage allocated for the gap buffer if it's below a low watermark
 int _gap_buffer_chkshrink(gap_buffer *gb);
 
+// get the position in the gap buffer (where the cursor should be)
+int gap_buffer_getcursor(gap_buffer *gb);
+
 // move the cursor by a relative amount (will be >= 0 and <= len)
-int gap_buffer_movepos(gap_buffer *gb, int count);
+int gap_buffer_movecursor(gap_buffer *gb, int count);
 
 // set the cursor position within the buffer (checks to be sure final position >= 0 and <= len)
-int gap_buffer_setpos(gap_buffer *gb, int pos);
+int gap_buffer_setcursor(gap_buffer *gb, int pos);
 
 // return the number of characters added to the buffer
 int gap_buffer_addch(gap_buffer *gb, char c);

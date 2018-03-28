@@ -90,26 +90,30 @@ int _gap_buffer_chkshrink(gap_buffer *gb) {
     int old_cursor = gb->cursor;
 
     // move the buffer gap to the end of the contents
-    if(gap_buffer_setpos(gb, gb->len) != gb->len) {
+    if(gap_buffer_setcursor(gb, gb->len) != gb->len) {
       return -1;
     }
     _gap_buffer_sync(gb);
 
     char *newptr = realloc(gb->buf, newlen);
     if(!newptr) {
-      gap_buffer_setpos(gb, old_cursor);
+      gap_buffer_setcursor(gb, old_cursor);
       return -1;
     }
 
     gb->buf = newptr;
     gb->maxlen = newlen;
     gb->gap_end = newlen;
-    gap_buffer_setpos(gb, old_cursor);
+    gap_buffer_setcursor(gb, old_cursor);
   }
   return 0;
 }
 
-int gap_buffer_movepos(gap_buffer *gb, int count) {
+int gap_buffer_getcursor(gap_buffer *gb) {
+  return gb->cursor;
+}
+
+int gap_buffer_movecursor(gap_buffer *gb, int count) {
   gb->cursor += count;
   if(gb->cursor < 0) {
     gb->cursor = 0;
@@ -118,7 +122,7 @@ int gap_buffer_movepos(gap_buffer *gb, int count) {
   return gb->cursor;
 }
 
-int gap_buffer_setpos(gap_buffer *gb, int pos) {
+int gap_buffer_setcursor(gap_buffer *gb, int pos) {
   gb->cursor = pos;
   if(gb->cursor < 0) {
     gb->cursor = 0;
