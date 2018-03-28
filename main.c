@@ -83,7 +83,7 @@ int main(int argc, char *argv[]) {
     int c = getch(), r = 0;
 
     if(c == KEY_RESIZE) { // resize event
-      if(editor_resize_windows() < 0) {
+      if(editor_resize_event() < 0) {
         fprintf(stderr, "Error during window resize\n");
         break;
       }

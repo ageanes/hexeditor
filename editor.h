@@ -44,6 +44,7 @@ struct editor_line {
   struct editor_line *prev;
 };
 
+// holds global state for the editor
 struct _editor_status {
   int mode;
   struct {
@@ -73,12 +74,14 @@ typedef struct _editor_status editor_status;
 
 extern editor_status g_editor;
 
+// possible editor modes
 enum _command_modes {
   MODE_COMMAND = 0,
   MODE_INSERT,
   NUMBER_MODES
 };
 
+// special operations for an editor mode
 struct _mode_ops {
   const char *mode_name;
   int (*enter_mode)();
@@ -92,48 +95,47 @@ extern mode_ops g_modes[];
 // prototypes
 
 // setup 
-int setup_curses();
-int setup_windows();
-int open_file(const char *filename);
-int setup_editor();
+int setup_curses(); // initializes ncurses structures
+int setup_windows(); // sets up windows (for ncurses)
+int open_file(const char *filename); // opens/reads desired file
+int setup_editor(); // sets up initial editor state
 
-// cleanup
+// cleanup, see setup_*
 void cleanup_editor();
 void cleanup_file();
 void cleanup_windows();
 void cleanup_curses();
 
-void editor_set_focus(WINDOW *window);
-void editor_place_cursor();
+void editor_set_focus(WINDOW *window); // sets the window that the cursor should appear in
+void editor_place_cursor(); // places the cursor onto the focused window
 
-// functionality
-void clear_status_window();
-void set_status_window_text(const char *str);
+// status window ops, pretty self explanatory
+void clear_status_window(); 
+void set_status_window_text(const char *str); 
 void append_status_window_text(const char *str);
 
+// input window ops, pretty self explanatory
 void clear_input_window();
 void set_input_window_text(const char *str);
 void append_input_window_text(const char *str);
 void append_input_window_char(char c);
 
+// switch editor modes
 int editor_switch_mode(int to_mode);
 
-void editor_update_window_sizes();
-int editor_resize_windows();
-void editor_refresh_windows();
-void editor_redraw_main_window_full();
+void editor_update_window_sizes(); // update saved window sizes to terminal size
+int editor_resize_event(); // high-level method called on a resize event
+void editor_refresh_windows(); // refresh the contents of windows
+void editor_redraw_main_window_full(); // redraw main window with buffer contents
 
 long editor_get_top_line(); // get the first line displayed on the editor window
 
-// set 'line' as the first line on the screen.
-// return the first line displayed on the screen (may be < line)
-long editor_goto_line_scan(long line); 
-void editor_char_left_main();
-void editor_char_right_main();
-void editor_line_down_main();
-void editor_line_up_main();
+long editor_goto_line_scan(long line); // slow method to go to a specified line by scanning from first line
+void editor_char_left_main(); // move main window cursor left one character
+void editor_char_right_main(); // move main window cursor right one character
+void editor_line_down_main(); // move main window cursor down one line (or scroll)
+void editor_line_up_main(); // move main window cursor up one line (or scroll)
 
-void editor_update_line();
-void editor_update_cursor_main();
+void editor_update_cursor_main(); // explicitly place the main window cursor according to editor state
 
 #endif // __EDITOR_H__

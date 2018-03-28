@@ -445,7 +445,7 @@ void editor_update_window_sizes() {
   getmaxyx(g_windows.inputwnd, g_windows.inputwnd_geom.h, g_windows.inputwnd_geom.w);
 }
 
-int editor_resize_windows() {
+int editor_resize_event() {
 
   editor_update_window_sizes();
 
@@ -657,6 +657,7 @@ void editor_line_down_main() {
   if(!el || !el->next) {
     return;
   }
+  LOG_MSG("Moving down from %d to %d", g_editor.screen.curline_number, g_editor.screen.curline_number + 1);
   el = el->next;
   ++ln;
   
